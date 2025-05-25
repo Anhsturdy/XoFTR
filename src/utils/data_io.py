@@ -64,7 +64,7 @@ class DataIOWrapper(nn.Module):
             w_new, h_new = map(lambda x: int(x // df * df), [w_new, h_new])
         
         img = cv2.resize(img, (w_new, h_new))
-        scale = np.array([w/w_new, h/h_new], dtype=np.float)
+        scale = np.array([w/w_new, h/h_new], dtype=float)
         if padding:  # padding
             pad_to = max(h_new, w_new)
             img, mask = self.pad_bottom_right(img, pad_to, ret_mask=True)
