@@ -13,15 +13,15 @@ _CN.XOFTR.MEDIUM_WINDOW_SIZE = 3  # window_size in fine_level, must be odd
 # 1. XoFTR-backbone (local feature CNN) config
 _CN.XOFTR.RESNET = CN()
 _CN.XOFTR.RESNET.INITIAL_DIM = 128
-_CN.XOFTR.RESNET.BLOCK_DIMS = [32, 64, 96]  # s1, s2, s3
+_CN.XOFTR.RESNET.BLOCK_DIMS = [128, 196, 256]  # s1, s2, s3
 
 # 2. XoFTR-coarse module config
 _CN.XOFTR.COARSE = CN()
 _CN.XOFTR.COARSE.INFERENCE = INFERENCE
-_CN.XOFTR.COARSE.D_MODEL = 96
+_CN.XOFTR.COARSE.D_MODEL = 256
 _CN.XOFTR.COARSE.D_FFN = 256
-_CN.XOFTR.COARSE.NHEAD = 6
-_CN.XOFTR.COARSE.LAYER_NAMES = ['self', 'cross'] 
+_CN.XOFTR.COARSE.NHEAD = 8
+_CN.XOFTR.COARSE.LAYER_NAMES = ['self', 'cross'] * 4
 _CN.XOFTR.COARSE.ATTENTION = 'linear'  # options: ['linear', 'full']
 
 # 3. Coarse-Matching config
