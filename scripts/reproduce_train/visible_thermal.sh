@@ -13,8 +13,8 @@ data_cfg_path="configs/data/megadepth_vistir_trainval_${TRAIN_IMG_SIZE}.py"
 main_cfg_path="configs/xoftr/outdoor/visible_thermal.py"
 
 n_nodes=1
-n_gpus_per_node=8
-torch_num_workers=16
+n_gpus_per_node=1
+torch_num_workers=8
 batch_size=2
 pin_memory=true
 exp_name="visible_thermal-${TRAIN_IMG_SIZE}-bs=$(($n_gpus_per_node * $n_nodes * $batch_size))"
