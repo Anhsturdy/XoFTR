@@ -120,8 +120,12 @@ class MultiSceneDataModule(pl.LightningDataModule):
         assert stage in ['fit', 'test'], "stage must be either fit or test"
 
         try:
-            self.world_size = dist.get_world_size()
-            self.rank = dist.get_rank()
+            if dist.is_available() and dist.is_initialized():
+                self.world_size = dist.get_world_size()
+                self.rank = dist.get_rank()
+            else:
+                self.world_size = 1
+                self.rank = 0
             logger.info(f"[rank:{self.rank}] world_size: {self.world_size}")
         except AssertionError as ae:
             self.world_size = 1
@@ -324,21 +328,29 @@ class MultiSceneDataModule(pl.LightningDataModule):
         return dataloader
     
     def val_dataloader(self):
-        """ Build validation dataloader for ScanNet / MegaDepth. """
         logger.info(f'[rank:{self.rank}/{self.world_size}]: Val Sampler and DataLoader re-init.')
         if not isinstance(self.val_dataset, abc.Sequence):
-            sampler = DistributedSampler(self.val_dataset, shuffle=False)
+            if self.world_size > 1:
+                sampler = DistributedSampler(self.val_dataset, shuffle=False)
+            else:
+                sampler = None
             return DataLoader(self.val_dataset, sampler=sampler, **self.val_loader_params)
         else:
             dataloaders = []
             for dataset in self.val_dataset:
-                sampler = DistributedSampler(dataset, shuffle=False)
+                if self.world_size > 1:
+                    sampler = DistributedSampler(dataset, shuffle=False)
+                else:
+                    sampler = None
                 dataloaders.append(DataLoader(dataset, sampler=sampler, **self.val_loader_params))
             return dataloaders
 
     def test_dataloader(self, *args, **kwargs):
         logger.info(f'[rank:{self.rank}/{self.world_size}]: Test Sampler and DataLoader re-init.')
-        sampler = DistributedSampler(self.test_dataset, shuffle=False)
+        if self.world_size > 1:
+            sampler = DistributedSampler(self.test_dataset, shuffle=False)
+        else:
+            sampler = None
         return DataLoader(self.test_dataset, sampler=sampler, **self.test_loader_params)
 
 
