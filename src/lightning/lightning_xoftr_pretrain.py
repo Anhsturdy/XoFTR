@@ -112,17 +112,20 @@ class PL_XoFTR_Pretrain(pl.LightningModule):
 
         return {'loss': batch['loss']}
 
-    def training_epoch_end(self, outputs):
-        avg_loss = torch.stack([x['loss'] for x in outputs]).mean()
-        if self.trainer.global_rank == 0:
+    def on_train_epoch_end(self):
+        if not self.train_losses:
+            return
+        avg_loss = torch.stack(self.train_losses).mean()
+        if self.trainer.is_global_zero:
             self.logger[0].experiment.add_scalar(
                 'train/avg_loss_on_epoch', avg_loss,
                 global_step=self.current_epoch)
             if self.config.TRAINER.USE_WANDB:
                 self.logger[1].log_metrics(
                     {'train/avg_loss_on_epoch': avg_loss},
-                    self.current_epoch)
-    
+                    step=self.current_epoch)
+        self.train_losses.clear()  # Clear for next epoch
+
     def validation_step(self, batch, batch_idx):
         self._trainval_inference(batch, self.val_generator)
     
