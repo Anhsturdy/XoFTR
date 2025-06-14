@@ -64,8 +64,8 @@ class PL_XoFTR(pl.LightningModule):
         return [optimizer], [scheduler]
     
     def optimizer_step(
-            self, epoch, batch_idx, optimizer, optimizer_idx,
-            optimizer_closure, on_tpu, using_native_amp, using_lbfgs):
+            self, epoch, batch_idx, optimizer,
+            optimizer_closure, on_tpu=False, using_native_amp=False, using_lbfgs=False):
         # learning rate warm up
         warmup_step = self.config.TRAINER.WARMUP_STEP
         if self.trainer.global_step < warmup_step:
