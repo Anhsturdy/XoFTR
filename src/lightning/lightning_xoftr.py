@@ -183,6 +183,8 @@ class PL_XoFTR(pl.LightningModule):
         
     def on_validation_epoch_end(self, outputs=None):
         # handle multiple validation sets
+        if outputs is None:
+            return
         multi_outputs = [outputs] if not isinstance(outputs[0], (list, tuple)) else outputs
         multi_val_metrics = defaultdict(list)
         
@@ -295,6 +297,8 @@ class PL_XoFTR(pl.LightningModule):
         return ret_dict
 
     def on_test_epoch_end(self, outputs=None):
+        if outputs is None:
+            return
         if self.config.DATASET.TEST_DATA_SOURCE == "VisTir":
             # metrics: dict of list, numpy
             metrics_per_scene = {}
