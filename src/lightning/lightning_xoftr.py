@@ -124,34 +124,44 @@ class PL_XoFTR(pl.LightningModule):
         if self.trainer.global_rank == 0 and self.global_step % self.trainer.log_every_n_steps == 0:
             # scalars
             for k, v in batch['loss_scalars'].items():
-                self.logger[0].experiment.add_scalar(f'train/{k}', v, self.global_step)
-                if self.config.TRAINER.USE_WANDB:
-                    self.logger[1].log_metrics({f'train/{k}': v}, self.global_step)
+                if isinstance(self.logger, list):
+                    self.logger[0].experiment.add_scalar(f'train/{k}', v, self.global_step)
+                    if self.config.TRAINER.USE_WANDB:
+                        self.logger[1].log_metrics({f'train/{k}': v}, self.global_step)
+                else:
+                    self.logger.experiment.add_scalar(f'train/{k}', v, self.global_step)
 
             # figures
             if self.config.TRAINER.ENABLE_PLOTTING:
                 compute_symmetrical_epipolar_errors(batch)  # compute epi_errs for each match
                 figures = make_matching_figures(batch, self.config, self.config.TRAINER.PLOT_MODE)
                 for k, v in figures.items():
-                    self.logger[0].experiment.add_figure(f'train_match/{k}', v, self.global_step)
+                    if isinstance(self.logger, list):
+                        self.logger[0].experiment.add_figure(f'train_match/{k}', v, self.global_step)
+                    else:
+                        self.logger.experiment.add_figure(f'train_match/{k}', v, self.global_step)
 
         return {'loss': batch['loss']}
 
     def on_train_epoch_end(self):
-        if not self.train_losses:
+        if not hasattr(self, "train_losses") or not self.train_losses:
             return
 
         avg_loss = torch.stack(self.train_losses).mean()
 
         if self.trainer.is_global_zero:
-            self.logger[0].experiment.add_scalar(
-                'train/avg_loss_on_epoch', avg_loss,
-                global_step=self.current_epoch)
-
-            if self.config.TRAINER.USE_WANDB:
-                self.logger[1].log_metrics(
-                    {'train/avg_loss_on_epoch': avg_loss},
-                    step=self.current_epoch)
+            if isinstance(self.logger, list):
+                self.logger[0].experiment.add_scalar(
+                    'train/avg_loss_on_epoch', avg_loss,
+                    global_step=self.current_epoch)
+                if self.config.TRAINER.USE_WANDB:
+                    self.logger[1].log_metrics(
+                        {'train/avg_loss_on_epoch': avg_loss},
+                        step=self.current_epoch)
+            else:
+                self.logger.experiment.add_scalar(
+                    'train/avg_loss_on_epoch', avg_loss,
+                    global_step=self.current_epoch)
 
         self.train_losses.clear()
     
@@ -245,18 +255,28 @@ class PL_XoFTR(pl.LightningModule):
                 if self.config.DATASET.VAL_DATA_SOURCE != "VisTir":
                     for k, v in loss_scalars.items():
                         mean_v = torch.stack(v).mean()
-                        self.logger.experiment.add_scalar(f'val_{valset_idx}/avg_{k}', mean_v, global_step=cur_epoch)
+                        if isinstance(self.logger, list):
+                            self.logger[0].experiment.add_scalar(f'val_{valset_idx}/avg_{k}', mean_v, global_step=cur_epoch)
+                        else:
+                            self.logger.experiment.add_scalar(f'val_{valset_idx}/avg_{k}', mean_v, global_step=cur_epoch)
 
                 for k, v in val_metrics_4tb.items():
-                    self.logger[0].experiment.add_scalar(f"metrics_{valset_idx}/{k}", v, global_step=cur_epoch)
-                    if self.config.TRAINER.USE_WANDB:
-                        self.logger[1].log_metrics({f"metrics_{valset_idx}/{k}": v}, cur_epoch)
+                    if isinstance(self.logger, list):
+                        self.logger[0].experiment.add_scalar(f"metrics_{valset_idx}/{k}", v, global_step=cur_epoch)
+                        if self.config.TRAINER.USE_WANDB:
+                            self.logger[1].log_metrics({f"metrics_{valset_idx}/{k}": v}, cur_epoch)
+                    else:
+                        self.logger.experiment.add_scalar(f"metrics_{valset_idx}/{k}", v, global_step=cur_epoch)
                 
                 for k, v in figures.items():
                     if self.trainer.global_rank == 0:
                         for plot_idx, fig in enumerate(v):
-                            self.logger[0].experiment.add_figure(
-                                f'val_match_{valset_idx}/{k}/pair-{plot_idx}', fig, cur_epoch, close=True)
+                            if isinstance(self.logger, list):
+                                self.logger[0].experiment.add_figure(
+                                    f'val_match_{valset_idx}/{k}/pair-{plot_idx}', fig, cur_epoch, close=True)
+                            else:
+                                self.logger.experiment.add_figure(
+                                    f'val_match_{valset_idx}/{k}/pair-{plot_idx}', fig, cur_epoch, close=True)
             plt.close('all')
 
         for thr in [5, 10, 20]:
