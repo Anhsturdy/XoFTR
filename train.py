@@ -76,9 +76,18 @@ def main():
     
     log_dir = logger[0].log_dir  # <- Fix added here
     
-    if config.TRAINER.USE_WANDB:
-        logger.append(WandbLogger(name=args.exp_name + f"_{datetime.now().strftime('%Y_%m_%d_%H_%M_%S')}",
-                                  project='XoFTR'))
+    if not config.TRAINER.USE_WANDB:
+        logger = TensorBoardLogger(save_dir='logs/tb_logs', name=args.exp_name, default_hp_metric=False)
+        ckpt_dir = Path(logger.log_dir) / 'checkpoints'
+        log_dir = logger.log_dir
+    else:
+        # Use a list if using both TensorBoard and WandB
+        logger = [
+            TensorBoardLogger(save_dir='logs/tb_logs', name=args.exp_name, default_hp_metric=False),
+            WandbLogger(name=args.exp_name + f"_{datetime.now().strftime('%Y_%m_%d_%H_%M_%S')}", project='XoFTR')
+        ]
+        ckpt_dir = Path(logger[0].log_dir) / 'checkpoints'
+        log_dir = logger[0].log_dir
 
     ckpt_callback = ModelCheckpoint(
         monitor='auc@10',
@@ -95,24 +104,25 @@ def main():
         callbacks.append(ckpt_callback)
 
     trainer = pl.Trainer(
-    accelerator='gpu',
-    devices=1,
-    benchmark=True,
-    max_epochs=30,
-    check_val_every_n_epoch=1,
-    log_every_n_steps=100,
-    num_sanity_val_steps=10,
-    limit_val_batches=1.0,
-    enable_checkpointing=not args.disable_ckpt,
-    default_root_dir=log_dir,  # optional, if used
-    callbacks=callbacks,       # optional
-    profiler=None
-)
-
+        accelerator='gpu',
+        devices=1,
+        benchmark=True,
+        max_epochs=30,
+        check_val_every_n_epoch=1,
+        log_every_n_steps=100,
+        num_sanity_val_steps=10,
+        limit_val_batches=1.0,
+        enable_checkpointing=not args.disable_ckpt,
+        default_root_dir=log_dir,
+        callbacks=callbacks,
+        profiler=None,
+        logger=logger
+    )
 
     loguru_logger.info(f"Trainer initialized!")
     loguru_logger.info(f"Start training!")
     trainer.fit(model, datamodule=data_module)
+
 
 
 if __name__ == '__main__':
