@@ -84,7 +84,7 @@ def main():
         # Use a list if using both TensorBoard and WandB
         logger = [
             TensorBoardLogger(save_dir='logs/tb_logs', name=args.exp_name, default_hp_metric=False),
-            WandbLogger(name=args.exp_name + f"_{datetime.now().strftime('%Y_%m_%d_%H_%M_%S')}", project='XoFTR')
+            WandbLogger(name=args.exp_name + f"_{datetime.now().strftime('%Y_%m_%d_%H_%M_%S')}", project='XoFTR', mode ="offline")
         ]
         ckpt_dir = Path(logger[0].log_dir) / 'checkpoints'
         log_dir = logger[0].log_dir
