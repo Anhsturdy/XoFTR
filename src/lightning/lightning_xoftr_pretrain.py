@@ -112,19 +112,27 @@ class PL_XoFTR_Pretrain(pl.LightningModule):
 
         return {'loss': batch['loss']}
 
-    def on_train_epoch_end(self):
-        if not self.train_losses:
+    def train_epoch_end(self):
+        if not hasattr(self, "train_losses") or not self.train_losses:
             return
+
         avg_loss = torch.stack(self.train_losses).mean()
+
         if self.trainer.is_global_zero:
-            self.logger[0].experiment.add_scalar(
-                'train/avg_loss_on_epoch', avg_loss,
-                global_step=self.current_epoch)
-            if self.config.TRAINER.USE_WANDB:
-                self.logger[1].log_metrics(
-                    {'train/avg_loss_on_epoch': avg_loss},
-                    step=self.current_epoch)
-        self.train_losses.clear()  # Clear for next epoch
+            if isinstance(self.logger, list):
+                self.logger[0].experiment.add_scalar(
+                    'train/avg_loss_on_epoch', avg_loss,
+                    global_step=self.current_epoch)
+                if self.config.TRAINER.USE_WANDB:
+                    self.logger[1].log_metrics(
+                        {'train/avg_loss_on_epoch': avg_loss},
+                        step=self.current_epoch)
+            else:
+                self.logger.experiment.add_scalar(
+                    'train/avg_loss_on_epoch', avg_loss,
+                    global_step=self.current_epoch)
+
+        self.train_losses.clear()
 
     def validation_step(self, batch, batch_idx):
         self._trainval_inference(batch, self.val_generator)
@@ -144,31 +152,30 @@ class PL_XoFTR_Pretrain(pl.LightningModule):
         self.val_generator.manual_seed(self.val_seed)
         # handle multiple validation sets
         multi_outputs = [outputs] if not isinstance(outputs[0], (list, tuple)) else outputs
-        
+
         for valset_idx, outputs in enumerate(multi_outputs):
-            # since pl performs sanity_check at the very begining of the training
-            cur_epoch = self.trainer.current_epoch
-            if not self.trainer.resume_from_checkpoint and self.trainer.running_sanity_check:
-                cur_epoch = -1
+            cur_epoch = self.current_epoch
 
             # 1. loss_scalars: dict of list, on cpu
             _loss_scalars = [o['loss_scalars'] for o in outputs]
             loss_scalars = {k: flattenList(all_gather([_ls[k] for _ls in _loss_scalars])) for k in _loss_scalars[0]}
-            
+
             _figures = [o['figures'] for o in outputs]
             figures = [item for sublist in _figures for item in sublist]
 
-            # tensorboard records only on rank 0
-            if self.trainer.global_rank == 0:
-                for k, v in loss_scalars.items():
-                    mean_v = torch.stack(v).mean()
-                    self.logger[0].experiment.add_scalar(f'val_{valset_idx}/avg_{k}', mean_v, global_step=cur_epoch)
-                    if self.config.TRAINER.USE_WANDB:
-                        self.logger[1].log_metrics({f'val_{valset_idx}/avg_{k}': mean_v}, cur_epoch)
+            # Log metrics using self.log (Lightning 2.x)
+            for k, v in loss_scalars.items():
+                mean_v = torch.stack(v).mean()
+                self.log(f'val_{valset_idx}/avg_{k}', mean_v, prog_bar=True, sync_dist=True)
 
+            # Log figures only on rank 0 and if logger supports it
+            if self.global_rank == 0 and hasattr(self.logger, "experiment"):
                 for plot_idx, fig in enumerate(figures):
-                    self.logger[0].experiment.add_figure(
-                        f'val_mae_{valset_idx}/pair-{plot_idx}', fig, cur_epoch, close=True)
+                    try:
+                        self.logger.experiment.add_figure(
+                            f'val_mae_{valset_idx}/pair-{plot_idx}', fig, cur_epoch, close=True)
+                    except Exception:
+                        pass  # Some loggers may not support add_figure
 
-            plt.close('all')
+        plt.close('all')
 

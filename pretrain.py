@@ -10,7 +10,7 @@ import pytorch_lightning as pl
 from pytorch_lightning.utilities import rank_zero_only
 from pytorch_lightning.loggers import TensorBoardLogger, WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
-from pytorch_lightning.plugins import DDPPlugin
+from pytorch_lightning.strategies import DDPStrategy 
 
 from src.config.default import get_cfg_defaults
 from src.utils.misc import get_rank_zero_only_logger, setup_gpus
@@ -93,29 +93,30 @@ def main():
     
     # Callbacks
     # TODO: update ModelCheckpoint to monitor multiple metrics
-    ckpt_callback = ModelCheckpoint(verbose=True, save_top_k=-1,
-                                    save_last=True,
-                                    dirpath=str(ckpt_dir),
-                                    filename='{epoch}')
+    ckpt_callback = ModelCheckpoint(
+    verbose=True,
+    save_top_k=-1,
+    save_last=True,
+    dirpath=str(ckpt_dir),
+    filename='{epoch}'
+)
     lr_monitor = LearningRateMonitor(logging_interval='step')
     callbacks = [lr_monitor]
     if not args.disable_ckpt:
         callbacks.append(ckpt_callback)
-    
-    # Lightning Trainer
-    trainer = pl.Trainer.from_argparse_args(
-        args,
-        plugins=DDPPlugin(find_unused_parameters=True,
-                          num_nodes=args.num_nodes,
-                          sync_batchnorm=config.TRAINER.WORLD_SIZE > 0),
+
+    # Lightning Trainer for 1 GPU
+    trainer = pl.Trainer(
+        accelerator="gpu",
+        devices=1,
         gradient_clip_val=config.TRAINER.GRADIENT_CLIPPING,
         callbacks=callbacks,
-        logger=logger,
-        sync_batchnorm=config.TRAINER.WORLD_SIZE > 0,
-        replace_sampler_ddp=False,  # use custom sampler
-        reload_dataloaders_every_epoch=False,  # avoid repeated samples!
-        weights_summary='full',
-        profiler=profiler)
+        logger=logger[0], 
+        replace_sampler_ddp=False,
+        reload_dataloaders_every_epoch=False,
+        profiler=profiler,
+        max_epochs=args.max_epochs if hasattr(args, "max_epochs") else None,
+    )
     loguru_logger.info(f"Trainer initialized!")
     loguru_logger.info(f"Start training!")
     trainer.fit(model, datamodule=data_module)
