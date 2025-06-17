@@ -22,35 +22,21 @@ loguru_logger = get_rank_zero_only_logger(loguru_logger)
 
 
 def parse_args():
-    # init a costum parser which will be added into pl.Trainer parser
-    # check documentation: https://pytorch-lightning.readthedocs.io/en/latest/common/trainer.html#trainer-flags
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument(
-        'data_cfg_path', type=str, help='data config path')
-    parser.add_argument(
-        'main_cfg_path', type=str, help='main config path')
-    parser.add_argument(
-        '--exp_name', type=str, default='default_exp_name')
-    parser.add_argument(
-        '--batch_size', type=int, default=4, help='batch_size per gpu')
-    parser.add_argument(
-        '--num_workers', type=int, default=4)
-    parser.add_argument(
-        '--pin_memory', type=lambda x: bool(strtobool(x)),
-        nargs='?', default=True, help='whether loading data to pinned memory or not')
-    parser.add_argument(
-        '--ckpt_path', type=str, default=None,
-        help='pretrained checkpoint path')
-    parser.add_argument(
-        '--disable_ckpt', action='store_true',
-        help='disable checkpoint saving (useful for debugging).')
-    parser.add_argument(
-        '--profiler_name', type=str, default=None,
-        help='options: [inference, pytorch], or leave it unset')
-    parser.add_argument(
-        '--parallel_load_data', action='store_true',
-        help='load datasets in with multiple processes.')
-
+    parser.add_argument('data_cfg_path', type=str, help='data config path')
+    parser.add_argument('main_cfg_path', type=str, help='main config path')
+    parser.add_argument('--exp_name', type=str, default='default_exp_name')
+    parser.add_argument('--batch_size', type=int, default=4, help='batch_size per gpu')
+    parser.add_argument('--num_workers', type=int, default=4)
+    parser.add_argument('--pin_memory', type=lambda x: bool(strtobool(x)),
+                        nargs='?', default=True, help='whether loading data to pinned memory or not')
+    parser.add_argument('--ckpt_path', type=str, default=None, help='pretrained checkpoint path')
+    parser.add_argument('--disable_ckpt', action='store_true', help='disable checkpoint saving (useful for debugging).')
+    parser.add_argument('--profiler_name', type=str, default=None, help='options: [inference, pytorch], or leave it unset')
+    parser.add_argument('--parallel_load_data', action='store_true', help='load datasets in with multiple processes.')
+    parser.add_argument('--gpus', type=int, default=1, help='number of gpus to use')
+    parser.add_argument('--num_nodes', type=int, default=1, help='number of nodes to use')
+    parser.add_argument('--max_epochs', type=int, default=15, help='maximum number of epochs')
     return parser.parse_args()
 
 
