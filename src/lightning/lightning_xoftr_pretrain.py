@@ -94,25 +94,37 @@ class PL_XoFTR_Pretrain(pl.LightningModule):
     
     def training_step(self, batch, batch_idx):
         self._trainval_inference(batch)
-        
-        # logging
-        if self.trainer.global_rank == 0 and self.global_step % self.trainer.log_every_n_steps == 0:
-            # scalars
+
+        # Store losses for epoch end
+        if not hasattr(self, "train_losses"):
+            self.train_losses = []
+        self.train_losses.append(batch['loss'].detach().cpu())
+
+        # Logging scalars and figures at intervals (only on rank 0)
+        if self.trainer.is_global_zero and self.global_step % self.trainer.log_every_n_steps == 0:
             for k, v in batch['loss_scalars'].items():
-                self.logger[0].experiment.add_scalar(f'train/{k}', v, self.global_step)
-                if self.config.TRAINER.USE_WANDB:
-                    self.logger[1].log_metrics({f'train/{k}': v}, self.global_step)
-            
+                if isinstance(self.logger, list):
+                    self.logger[0].experiment.add_scalar(f'train/{k}', v, self.global_step)
+                    if self.config.TRAINER.USE_WANDB:
+                        self.logger[1].log_metrics({f'train/{k}': v}, self.global_step)
+                else:
+                    self.logger.experiment.add_scalar(f'train/{k}', v, self.global_step)
+
             if self.config.TRAINER.ENABLE_PLOTTING:
                 figures = make_mae_figures(batch)
                 for i, figure in enumerate(figures):
-                    self.logger[0].experiment.add_figure(
-                    f'train_mae/node_{self.trainer.global_rank}-device_{self.device.index}-batch_{i}',
-                    figure, self.global_step)
+                    if isinstance(self.logger, list):
+                        self.logger[0].experiment.add_figure(
+                            f'train_mae/node_{self.trainer.global_rank}-device_{self.device.index}-batch_{i}',
+                            figure, self.global_step)
+                    else:
+                        self.logger.experiment.add_figure(
+                            f'train_mae/node_{self.trainer.global_rank}-device_{self.device.index}-batch_{i}',
+                            figure, self.global_step)
 
         return {'loss': batch['loss']}
 
-    def train_epoch_end(self):
+    def on_train_epoch_end(self):
         if not hasattr(self, "train_losses") or not self.train_losses:
             return
 
@@ -136,46 +148,51 @@ class PL_XoFTR_Pretrain(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         self._trainval_inference(batch, self.val_generator)
-    
+        # Store outputs for epoch end
+        if not hasattr(self, "val_outputs"):
+            self.val_outputs = []
         val_plot_interval = max(self.trainer.num_val_batches[0] // \
                                  (self.trainer.num_gpus * self.n_vals_plot), 1)
         figures = []
         if batch_idx % val_plot_interval == 0:
             figures = make_mae_figures(batch)
-
-        return {
+        output = {
             'loss_scalars': batch['loss_scalars'],
             'figures': figures,
         }
+        self.val_outputs.append(output)
+        return output
         
-    def validation_epoch_end(self, outputs):
+    def on_validation_epoch_end(self):
+        if not hasattr(self, "val_outputs") or not self.val_outputs:
+            return
+
         self.val_generator.manual_seed(self.val_seed)
-        # handle multiple validation sets
+        outputs = self.val_outputs
+        self.val_outputs = []  # Clear for next epoch
+
         multi_outputs = [outputs] if not isinstance(outputs[0], (list, tuple)) else outputs
 
         for valset_idx, outputs in enumerate(multi_outputs):
             cur_epoch = self.current_epoch
 
-            # 1. loss_scalars: dict of list, on cpu
             _loss_scalars = [o['loss_scalars'] for o in outputs]
             loss_scalars = {k: flattenList(all_gather([_ls[k] for _ls in _loss_scalars])) for k in _loss_scalars[0]}
 
             _figures = [o['figures'] for o in outputs]
             figures = [item for sublist in _figures for item in sublist]
 
-            # Log metrics using self.log (Lightning 2.x)
             for k, v in loss_scalars.items():
                 mean_v = torch.stack(v).mean()
                 self.log(f'val_{valset_idx}/avg_{k}', mean_v, prog_bar=True, sync_dist=True)
 
-            # Log figures only on rank 0 and if logger supports it
             if self.global_rank == 0 and hasattr(self.logger, "experiment"):
                 for plot_idx, fig in enumerate(figures):
                     try:
                         self.logger.experiment.add_figure(
                             f'val_mae_{valset_idx}/pair-{plot_idx}', fig, cur_epoch, close=True)
                     except Exception:
-                        pass  # Some loggers may not support add_figure
+                        pass
 
         plt.close('all')
 
