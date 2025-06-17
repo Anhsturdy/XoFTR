@@ -97,7 +97,6 @@ def main():
         gradient_clip_val=config.TRAINER.GRADIENT_CLIPPING,
         callbacks=callbacks,
         logger=logger[0], 
-        reload_dataloaders_every_epoch=False,
         profiler=profiler,
         max_epochs=args.max_epochs if hasattr(args, "max_epochs") else None,
     )
