@@ -51,7 +51,6 @@ def parse_args():
         '--parallel_load_data', action='store_true',
         help='load datasets in with multiple processes.')
 
-    parser = pl.Trainer.add_argparse_args(parser)
     return parser.parse_args()
 
 
