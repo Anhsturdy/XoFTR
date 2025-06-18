@@ -61,14 +61,15 @@ class PretrainDataModule(pl.LightningDataModule):
         try:
             if dist.is_available() and dist.is_initialized():
                 self.world_size = dist.get_world_size()
+                self.rank = dist.get_rank()
             else:
                 self.world_size = 1
-            self.rank = dist.get_rank()
+                self.rank = 0
             logger.info(f"[rank:{self.rank}] world_size: {self.world_size}")
         except AssertionError as ae:
             self.world_size = 1
             self.rank = 0
-            logger.warning(str(ae) + " (set wolrd_size=1 and rank=0)")
+            logger.warning(str(ae) + " (set world_size=1 and rank=0)")
 
         if stage == 'fit':
             self.train_dataset = self._setup_dataset(
