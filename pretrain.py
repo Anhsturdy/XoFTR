@@ -10,7 +10,6 @@ import pytorch_lightning as pl
 from pytorch_lightning.utilities import rank_zero_only
 from pytorch_lightning.loggers import TensorBoardLogger, WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
-from pytorch_lightning.strategies import DDPStrategy 
 
 from src.config.default import get_cfg_defaults
 from src.utils.misc import get_rank_zero_only_logger, setup_gpus
@@ -35,6 +34,12 @@ def parse_args():
     parser.add_argument('--profiler_name', type=str, default=None, help='options: [inference, pytorch], or leave it unset')
     parser.add_argument('--parallel_load_data', action='store_true', help='load datasets in with multiple processes.')
     parser.add_argument('--gpus', type=int, default=1, help='number of gpus to use')
+    parser.add_argument('--accelerator', type=str, default="gpu")
+    parser.add_argument('--check_val_every_n_epoch', type=int, default=1)
+    parser.add_argument('--log_every_n_steps', type=int, default=100)
+    parser.add_argument('--limit_val_batches', type=float, default=1.0)
+    parser.add_argument('--num_sanity_val_steps', type=int, default=10)
+    parser.add_argument('--benchmark', type=bool, default=True)
     parser.add_argument('--num_nodes', type=int, default=1, help='number of nodes to use')
     parser.add_argument('--max_epochs', type=int, default=15, help='maximum number of epochs')
     return parser.parse_args()
