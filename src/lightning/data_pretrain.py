@@ -8,7 +8,6 @@ from torch.utils.data import (
     ConcatDataset,
     DistributedSampler
 )
-
 from src.datasets.pretrain_dataset import PretrainDataset
 
 
@@ -60,7 +59,10 @@ class PretrainDataModule(pl.LightningDataModule):
         assert stage in ['fit', 'test'], "stage must be either fit or test"
 
         try:
-            self.world_size = dist.get_world_size()
+            if dist.is_available() and dist.is_initialized():
+                self.world_size = dist.get_world_size()
+            else:
+                self.world_size = 1
             self.rank = dist.get_rank()
             logger.info(f"[rank:{self.rank}] world_size: {self.world_size}")
         except AssertionError as ae:
