@@ -282,7 +282,7 @@ class PL_XoFTR(pl.LightningModule):
 
         for thr in [5, 10, 20]:
             # log on all ranks for ModelCheckpoint callback to work properly
-            self.log(f'auc@{thr}', torch.tensor(np.mean(multi_val_metrics[f'auc@{thr}'])))  # ckpt monitors on this
+            self.log(f'auc@{thr}', torch.tensor(np.mean(multi_val_metrics[f'auc@{thr}'])), prog_bar=True, on_epoch=True, on_step=False)  # ckpt monitors on this
 
     def test_step(self, batch, batch_idx):
         with self.profiler.profile("XoFTR"):
