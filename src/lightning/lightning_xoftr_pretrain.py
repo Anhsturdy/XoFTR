@@ -56,8 +56,8 @@ class PL_XoFTR_Pretrain(pl.LightningModule):
         return [optimizer], [scheduler]
     
     def optimizer_step(
-            self, epoch, batch_idx, optimizer, optimizer_idx,
-            optimizer_closure, on_tpu, using_native_amp, using_lbfgs):
+            self, epoch, batch_idx, optimizer,
+            optimizer_closure, on_tpu=False, using_native_amp=False, using_lbfgs=False):
         # learning rate warm up
         warmup_step = self.config.TRAINER.WARMUP_STEP
         if self.trainer.global_step < warmup_step:
@@ -151,8 +151,7 @@ class PL_XoFTR_Pretrain(pl.LightningModule):
         # Store outputs for epoch end
         if not hasattr(self, "val_outputs"):
             self.val_outputs = []
-        val_plot_interval = max(self.trainer.num_val_batches[0] // \
-                                 (self.trainer.num_gpus * self.n_vals_plot), 1)
+        val_plot_interval = max(self.trainer.num_val_batches[0] // self.n_vals_plot, 1)
         figures = []
         if batch_idx % val_plot_interval == 0:
             figures = make_mae_figures(batch)

@@ -112,17 +112,26 @@ class PretrainDataModule(pl.LightningDataModule):
 
     def train_dataloader(self):
         """ Build training dataloader for KAIST dataset. """
-        sampler = DistributedSampler(self.train_dataset, shuffle=True)
-        dataloader = DataLoader(self.train_dataset, sampler=sampler, **self.train_loader_params)
-        return dataloader
+        if dist.is_available() and dist.is_initialized():
+            sampler = DistributedSampler(self.train_dataset, shuffle=True)
+            return DataLoader(self.train_dataset, sampler=sampler, **self.train_loader_params)
+        else:
+            return DataLoader(self.train_dataset, shuffle=True, **self.train_loader_params)
     
     def val_dataloader(self):
         """ Build validation dataloader KAIST dataset. """
         if not isinstance(self.val_dataset, abc.Sequence):
-            return DataLoader(self.val_dataset, sampler=sampler, **self.val_loader_params)
+            if dist.is_available() and dist.is_initialized():
+                sampler = DistributedSampler(self.val_dataset, shuffle=False)
+                return DataLoader(self.val_dataset, sampler=sampler, **self.val_loader_params)
+            else:
+                return DataLoader(self.val_dataset, **self.val_loader_params)
         else:
             dataloaders = []
             for dataset in self.val_dataset:
-                sampler = DistributedSampler(dataset, shuffle=False)
-                dataloaders.append(DataLoader(dataset, sampler=sampler, **self.val_loader_params))
+                if dist.is_available() and dist.is_initialized():
+                    sampler = DistributedSampler(dataset, shuffle=False)
+                    dataloaders.append(DataLoader(dataset, sampler=sampler, **self.val_loader_params))
+                else:
+                    dataloaders.append(DataLoader(dataset, **self.val_loader_params))
             return dataloaders
