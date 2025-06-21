@@ -225,7 +225,6 @@ class PL_XoFTR(pl.LightningModule):
                 val_metrics_4tb = {}
                 for thr in [5, 10, 20]:
                     temp = []
-                    self.log(f'auc@{thr}', torch.tensor(np.mean(multi_val_metrics[f'auc@{thr}'])),prog_bar=True, sync_dist=True )
                     for scene_id in metrics_per_scene.keys():
                         temp.append(aucs_per_scene[scene_id][f'auc@{thr}'])
                     val_metrics_4tb[f'auc@{thr}'] = float(np.array(temp, dtype=float).mean())
