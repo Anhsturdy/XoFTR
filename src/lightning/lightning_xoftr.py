@@ -60,7 +60,14 @@ class PL_XoFTR(pl.LightningModule):
         self.validation_step_outputs = []
         self.test_step_outputs = []
 
-        
+    def setup(self, stage: str) -> None:
+        if isinstance(self.logger, list):
+            self.tb_logger = self.logger[0]
+            self.wandb_logger = self.logger[1] if len(self.logger) > 1 else None
+        else:
+            self.tb_logger = self.logger
+            self.wandb_logger = None
+
     def configure_optimizers(self):
         # FIXME: The scheduler did not work properly when `--resume_from_checkpoint`
         optimizer = build_optimizer(self, self.config)
@@ -127,27 +134,26 @@ class PL_XoFTR(pl.LightningModule):
         self.training_step_outputs.append(loss)
         # logging
         if self.trainer.global_rank == 0 and self.global_step % self.trainer.log_every_n_steps == 0:
-            # scalars
             for k, v in batch['loss_scalars'].items():
-                self.logger[0].experiment.add_scalar(f'train/{k}', v, self.global_step)
-                if self.config.TRAINER.USE_WANDB:
-                    self.logger[1].log_metrics({f'train/{k}': v}, self.global_step)
+                self.tb_logger.experiment.add_scalar(f'train/{k}', v, self.global_step)
+                if self.config.TRAINER.USE_WANDB and self.wandb_logger:
+                    self.wandb_logger.log_metrics({f'train/{k}': v}, self.global_step)
 
             # figures
             if self.config.TRAINER.ENABLE_PLOTTING:
                 compute_symmetrical_epipolar_errors(batch)  # compute epi_errs for each match
                 figures = make_matching_figures(batch, self.config, self.config.TRAINER.PLOT_MODE)
                 for k, v in figures.items():
-                    self.logger[0].experiment.add_figure(f'train_match/{k}', v, self.global_step)
+                    self.tb_logger.experiment.add_figure(f'train_match/{k}', v, self.global_step)
 
         return {'loss': batch['loss']}
 
     def on_training_epoch_end(self):
         if self.trainer.global_rank == 0:
             avg_loss = torch.stack(self.training_step_outputs).mean()
-            self.logger[0].experiment.add_scalar('train/avg_loss_on_epoch', avg_loss, global_step=self.current_epoch)
-            if self.config.TRAINER.USE_WANDB:
-                self.logger[1].log_metrics({'train/avg_loss_on_epoch': avg_loss}, self.current_epoch)
+            self.tb_logger.experiment.add_scalar('train/avg_loss_on_epoch', avg_loss, global_step=self.current_epoch)
+            if self.config.TRAINER.USE_WANDB and self.wandb_logger:
+                self.wandb_logger.log_metrics({'train/avg_loss_on_epoch': avg_loss}, self.current_epoch)
         self.training_step_outputs.clear()
     
     def validation_step(self, batch, batch_idx):
@@ -234,15 +240,15 @@ class PL_XoFTR(pl.LightningModule):
                         mean_v = torch.stack(v).mean()
                         self.logger.experiment.add_scalar(f'val_{valset_idx}/avg_{k}', mean_v, global_step=cur_epoch)
 
-                for k, v in val_metrics_4tb.items():
-                    self.logger[0].experiment.add_scalar(f"metrics_{valset_idx}/{k}", v, global_step=cur_epoch)
-                    if self.config.TRAINER.USE_WANDB:
-                        self.logger[1].log_metrics({f"metrics_{valset_idx}/{k}": v}, cur_epoch)
+                    for k, v in val_metrics_4tb.items():
+                        self.tb_logger.experiment.add_scalar(f"metrics_{valset_idx}/{k}", v, global_step=cur_epoch)
+                        if self.config.TRAINER.USE_WANDB and self.wandb_logger:
+                            self.wandb_logger.log_metrics({f"metrics_{valset_idx}/{k}": v}, cur_epoch)
                 
                 for k, v in figures.items():
                     if self.trainer.global_rank == 0:
                         for plot_idx, fig in enumerate(v):
-                            self.logger[0].experiment.add_figure(
+                            self.tb_logger.experiment.add_figure(
                                 f'val_match_{valset_idx}/{k}/pair-{plot_idx}', fig, cur_epoch, close=True)
             plt.close('all')
 
