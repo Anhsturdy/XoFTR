@@ -315,9 +315,7 @@ class PL_XoFTR(pl.LightningModule):
 
         return ret_dict
 
-    def on_test_epoch_end(self, outputs=None):
-        if outputs is None:
-            return
+    def on_test_epoch_end(self, outputs):
         if self.config.DATASET.TEST_DATA_SOURCE == "VisTir":
             # metrics: dict of list, numpy
             metrics_per_scene = {}
