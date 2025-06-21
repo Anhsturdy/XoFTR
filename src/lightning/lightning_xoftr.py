@@ -190,17 +190,15 @@ class PL_XoFTR(pl.LightningModule):
                 'figures': figures,
             }
         
-    def on_validation_epoch_end(self, outputs=None):
+    def on_validation_epoch_end(self, outputs):
         # handle multiple validation sets
-        if outputs is None:
-            return
         multi_outputs = [outputs] if not isinstance(outputs[0], (list, tuple)) else outputs
         multi_val_metrics = defaultdict(list)
         
         for valset_idx, outputs in enumerate(multi_outputs):
             # since pl performs sanity_check at the very begining of the training
             cur_epoch = self.trainer.current_epoch
-            if not self.trainer.resume_from_checkpoint and self.trainer.running_sanity_check:
+            if self.trainer.sanity_checking:
                 cur_epoch = -1
             
             if self.config.DATASET.VAL_DATA_SOURCE == "VisTir":
@@ -278,9 +276,11 @@ class PL_XoFTR(pl.LightningModule):
                                     f'val_match_{valset_idx}/{k}/pair-{plot_idx}', fig, cur_epoch, close=True)
             plt.close('all')
 
+      
         for thr in [5, 10, 20]:
-            value = np.mean(multi_val_metrics[f'auc@{thr}']) if f'auc@{thr}' in multi_val_metrics else 0.0
-            self.log(f'auc@{thr}', torch.tensor(value), prog_bar=True, on_epoch=True, on_step=False, sync_dist=True)
+            value = torch.tensor(np.mean(multi_val_metrics.get(f'auc@{thr}', [0.0])))
+            self.log(f'auc@{thr}', value, prog_bar=True, on_epoch=True, on_step=False, sync_dist=True)
+
 
     def test_step(self, batch, batch_idx):
         with self.profiler.profile("XoFTR"):
