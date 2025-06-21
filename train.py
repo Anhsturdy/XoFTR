@@ -96,8 +96,7 @@ def main():
         mode='max',
         save_last=True,
         dirpath=str(ckpt_dir),
-        filename='{epoch}-{auc@5:.3f}-{auc@10:.3f}-{auc@20:.3f}',
-        strict=False           
+        filename='{epoch}-{auc@5:.3f}-{auc@10:.3f}-{auc@20:.3f}',        
     )
     lr_monitor = LearningRateMonitor(logging_interval='step')
     callbacks = [lr_monitor]
