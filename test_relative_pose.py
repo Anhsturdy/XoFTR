@@ -300,7 +300,7 @@ if __name__ == '__main__':
         subcommand = subparsers.add_parser('xoftr')
         subcommand.add_argument('--match_threshold', type=float, default=0.3)
         subcommand.add_argument('--fine_threshold', type=float, default=0.1)
-        subcommand.add_argument('--ckpt', type=str, default="./weights/weights_xoftr_640.ckpt")
+        subcommand.add_argument('--ckpt', type=str, default="weights/weights_xoftr_640.ckpt")
         add_common_arguments(subcommand)
 
     parser = argparse.ArgumentParser(description='Benchmark Relative Pose')

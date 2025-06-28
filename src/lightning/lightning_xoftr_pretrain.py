@@ -48,6 +48,8 @@ class PL_XoFTR_Pretrain(pl.LightningModule):
         
         # Testing
         self.dump_dir = dump_dir
+        self.training_step_outputs = []
+        self.validation_step_outputs = []
         
     def configure_optimizers(self):
         # FIXME: The scheduler did not work properly when `--resume_from_checkpoint`
@@ -94,11 +96,8 @@ class PL_XoFTR_Pretrain(pl.LightningModule):
     
     def training_step(self, batch, batch_idx):
         self._trainval_inference(batch)
-
-        # Store losses for epoch end
-        if not hasattr(self, "train_losses"):
-            self.train_losses = []
-        self.train_losses.append(batch['loss'].detach().cpu())
+        loss = batch['loss']
+        self.training_step_outputs.append(loss)
 
         # Logging scalars and figures at intervals (only on rank 0)
         if self.trainer.is_global_zero and self.global_step % self.trainer.log_every_n_steps == 0:
@@ -125,10 +124,7 @@ class PL_XoFTR_Pretrain(pl.LightningModule):
         return {'loss': batch['loss']}
 
     def on_train_epoch_end(self):
-        if not hasattr(self, "train_losses") or not self.train_losses:
-            return
-
-        avg_loss = torch.stack(self.train_losses).mean()
+        avg_loss = torch.stack(self.training_step_outputs).mean()
 
         if self.trainer.is_global_zero:
             if isinstance(self.logger, list):
@@ -144,13 +140,10 @@ class PL_XoFTR_Pretrain(pl.LightningModule):
                     'train/avg_loss_on_epoch', avg_loss,
                     global_step=self.current_epoch)
 
-        self.train_losses.clear()
+        self.training_step_outputs.clear()
 
     def validation_step(self, batch, batch_idx):
         self._trainval_inference(batch, self.val_generator)
-        # Store outputs for epoch end
-        if not hasattr(self, "val_outputs"):
-            self.val_outputs = []
         val_plot_interval = max(self.trainer.num_val_batches[0] // self.n_vals_plot, 1)
         figures = []
         if batch_idx % val_plot_interval == 0:
@@ -159,7 +152,7 @@ class PL_XoFTR_Pretrain(pl.LightningModule):
             'loss_scalars': batch['loss_scalars'],
             'figures': figures,
         }
-        self.val_outputs.append(output)
+        self.validation_step_outputs.append(output)
         return output
         
     def on_validation_epoch_end(self):
