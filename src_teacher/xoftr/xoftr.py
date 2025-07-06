@@ -20,7 +20,7 @@ class XoFTR(nn.Module):
         self.fine_matching= FineSubMatching(config)
 
 
-    def forward(self, data):
+    def forward(self, data,return_logits=False):
         """ 
         Update:
             data (dict): {
@@ -86,7 +86,13 @@ class XoFTR(nn.Module):
 
         # 5. match fine-level and sub-pixel refinement
         self.fine_matching(feat_f0_unfold, feat_f1_unfold, data)
-
+        if return_logits:
+            # Example: return coarse-level features as logits
+            # You may want to return something else depending on your distillation target
+            return feat_c0, feat_c1
+        # Otherwise, keep the original behavior (in-place update)
+        return None
+        
     def load_state_dict(self, state_dict, *args, **kwargs):
         for k in list(state_dict.keys()):
             if k.startswith('matcher.'):
