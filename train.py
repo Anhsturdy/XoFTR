@@ -24,6 +24,10 @@ loguru_logger = get_rank_zero_only_logger(loguru_logger)
 
 def parse_args():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('--teacher_cfg_path', type=str, default=None, help='teacher config path')
+    parser.add_argument('--teacher_ckpt_path', type=str, default=None, help='teacher checkpoint path')
+    parser.add_argument('--distill_alpha', type=float, default=0.5, help='distillation loss weight')
+    parser.add_argument('--distill_temp', type=float, default=1.0, help='distillation temperature')
     parser.add_argument('data_cfg_path', type=str, help='data config path')
     parser.add_argument('main_cfg_path', type=str, help='main config path')
     parser.add_argument('--exp_name', type=str, default='default_exp_name')
@@ -56,6 +60,12 @@ def main():
     config.merge_from_file(args.data_cfg_path)
     pl.seed_everything(config.TRAINER.SEED)
 
+    teacher_config = None
+    if args.teacher_cfg_path:
+        from src_teacher.config.default import get_cfg_defaults as get_teacher_cfg_defaults
+        teacher_config = get_teacher_cfg_defaults()
+        teacher_config.merge_from_file(args.teacher_cfg_path)
+
     args.gpus = _n_gpus = setup_gpus(args.gpus)
     config.TRAINER.WORLD_SIZE = _n_gpus * args.num_nodes
     config.TRAINER.TRUE_BATCH_SIZE = config.TRAINER.WORLD_SIZE * args.batch_size
@@ -65,7 +75,13 @@ def main():
     config.TRAINER.WARMUP_STEP = math.floor(config.TRAINER.WARMUP_STEP / _scaling)
 
     profiler = build_profiler(args.profiler_name)
-    model = PL_XoFTR(config, pretrained_ckpt=args.ckpt_path, profiler=profiler)
+    model = PL_XoFTR(config,
+                    pretrained_ckpt=args.ckpt_path, 
+                    profiler=profiler, 
+                    teacher_cfg=teacher_config, 
+                    teacher_ckpt=args.teacher_ckpt_path, 
+                    distill_alpha=args.distill_alpha, 
+                    distill_temp=args.distill_temp)
     loguru_logger.info(f"XoFTR LightningModule initialized!")
 
     data_module = MultiSceneDataModule(args, config)

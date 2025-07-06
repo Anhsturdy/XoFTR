@@ -23,10 +23,10 @@ from src.utils.plotting import make_matching_figures
 from src.utils.comm import gather, all_gather
 from src.utils.misc import lower_config, flattenList
 from src.utils.profiler import PassThroughProfiler
-
+import torch.nn.functional as F
 
 class PL_XoFTR(pl.LightningModule):
-    def __init__(self, config, pretrained_ckpt=None, profiler=None, dump_dir=None):
+    def __init__(self, config, pretrained_ckpt=None, profiler=None, dump_dir=None, teacher_cfg=None, teacher_ckpt=None, distill_alpha=0.5, distill_temp=1.0):
         """
         TODO:
             - use the new version of PL logging API.
@@ -59,6 +59,18 @@ class PL_XoFTR(pl.LightningModule):
         self.training_step_outputs = []
         self.validation_step_outputs = []
         self.test_step_outputs = []
+        # Distillation
+        self.distillation = teacher_cfg is not None and teacher_ckpt is not None
+        self.distill_alpha = distill_alpha
+        self.distill_temp = distill_temp
+        if self.distillation:
+            from src_teacher.xoftr import XoFTR as TeacherXoFTR
+            self.teacher = TeacherXoFTR(config=teacher_cfg['xoftr'])
+            teacher_state = torch.load(teacher_ckpt, map_location='cpu')['state_dict']
+            self.teacher.load_state_dict(teacher_state, strict=False)
+            self.teacher.eval()
+            for p in self.teacher.parameters():
+                p.requires_grad = False
 
     def setup(self, stage: str) -> None:
         if isinstance(self.logger, list):
@@ -131,6 +143,21 @@ class PL_XoFTR(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         self._trainval_inference(batch)
         loss = batch['loss']
+        if self.distillation:
+            with torch.no_grad():
+                teacher_out = self.teacher(batch, return_logits=True)  # adapt as needed
+            student_out = self.matcher(batch, return_logits=True)     # adapt as needed
+
+            distill_loss = F.kl_div(
+                F.log_softmax(student_out / self.distill_temp, dim=-1),
+                F.softmax(teacher_out / self.distill_temp, dim=-1),
+                reduction='batchmean'
+            ) * (self.distill_temp ** 2)
+
+            loss = (1 - self.distill_alpha) * loss + self.distill_alpha * distill_loss
+            batch['loss'] = loss
+            batch['loss_scalars']['distill_loss'] = distill_loss.detach()
+            
         self.training_step_outputs.append(loss)
         # logging
         if self.trainer.global_rank == 0 and self.global_step % self.trainer.log_every_n_steps == 0:
