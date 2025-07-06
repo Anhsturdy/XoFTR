@@ -65,6 +65,9 @@ class PL_XoFTR(pl.LightningModule):
         self.distill_temp = distill_temp
         if self.distillation:
             from src_teacher.xoftr import XoFTR as TeacherXoFTR
+            from src_teacher.config.default import get_cfg_defaults as get_teacher_cfg_defaults
+            from src_teacher.utils.misc import lower_config as lower_teacher_config
+            teacher_cfg = lower_teacher_config(get_teacher_cfg_defaults(inference=True))
             self.teacher = TeacherXoFTR(config=teacher_cfg['xoftr'])
             teacher_state = torch.load(teacher_ckpt, map_location='cpu')['state_dict']
             self.teacher.load_state_dict(teacher_state, strict=False)
@@ -157,7 +160,7 @@ class PL_XoFTR(pl.LightningModule):
             loss = (1 - self.distill_alpha) * loss + self.distill_alpha * distill_loss
             batch['loss'] = loss
             batch['loss_scalars']['distill_loss'] = distill_loss.detach()
-            
+
         self.training_step_outputs.append(loss)
         # logging
         if self.trainer.global_rank == 0 and self.global_step % self.trainer.log_every_n_steps == 0:
