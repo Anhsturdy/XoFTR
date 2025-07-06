@@ -148,14 +148,20 @@ class PL_XoFTR(pl.LightningModule):
         loss = batch['loss']
         if self.distillation:
             with torch.no_grad():
-                teacher_out = self.teacher(batch, return_logits=True)  # adapt as needed
-            student_out = self.matcher(batch, return_logits=True)     # adapt as needed
+                teacher_out0, teacher_out1 = self.teacher(batch, return_logits=True)  # adapt as needed
+            student_out0, student_out1 = self.matcher(batch, return_logits=True)     # adapt as needed
 
-            distill_loss = F.kl_div(
-                F.log_softmax(student_out / self.distill_temp, dim=-1),
-                F.softmax(teacher_out / self.distill_temp, dim=-1),
+            distill_loss0 = F.kl_div(
+                F.log_softmax(student_out0 / self.distill_temp, dim=-1),
+                F.softmax(teacher_out0 / self.distill_temp, dim=-1),
                 reduction='batchmean'
-            ) * (self.distill_temp ** 2)
+            )
+            distill_loss1 = F.kl_div(
+                F.log_softmax(student_out1 / self.distill_temp, dim=-1),
+                F.softmax(teacher_out1 / self.distill_temp, dim=-1),
+                reduction='batchmean'
+            )
+            distill_loss = (distill_loss0 + distill_loss1) / 2 * (self.distill_temp ** 2)
 
             loss = (1 - self.distill_alpha) * loss + self.distill_alpha * distill_loss
             batch['loss'] = loss
