@@ -72,7 +72,7 @@ class PL_XoFTR(pl.LightningModule):
 
         # ---------- student  ----------
         self.matcher = XoFTR(config=_config["xoftr"])
-        self.loss_fn = XoFTRLoss(_config)
+        self.loss = XoFTRLoss(_config)
 
         if pretrained_ckpt:
             state = torch.load(pretrained_ckpt, map_location="cpu")["state_dict"]
