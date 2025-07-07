@@ -77,6 +77,7 @@ class XoFTR(nn.Module):
         # 3. match coarse-level
         self.coarse_matching(feat_c0, feat_c1, data, mask_c0=mask_c0, mask_c1=mask_c1)
 
+
         # 4. fine-level matching module       
         feat_f0_unfold, feat_f1_unfold = self.fine_process(feat_f0, feat_f1,
                                                            feat_m0, feat_m1,
@@ -87,10 +88,9 @@ class XoFTR(nn.Module):
         # 5. match fine-level and sub-pixel refinement
         self.fine_matching(feat_f0_unfold, feat_f1_unfold, data)
         if return_logits:
-            # Example: return coarse-level features as logits
-            # You may want to return something else depending on your distillation target
-            return feat_c0, feat_c1
-        # Otherwise, keep the original behavior (in-place update)
+            sim = data["sim_matrix_fine"]              # [M, W, W]
+            return sim, sim.transpose(1, 2)  
+
         return None
 
     def load_state_dict(self, state_dict, *args, **kwargs):

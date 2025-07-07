@@ -26,9 +26,8 @@ from src.utils.profiler import PassThroughProfiler
 import torch.nn.functional as F
 
 class PL_XoFTR(pl.LightningModule):
-    """Lightning wrapper that supports knowledge‑distillation between a
-    *teacher* XoFTR and a lighter *student* model with smaller hidden size.
-    """
+    """Lightning wrapper that supports knowledge‑distillation."""
+
     def __init__(
         self,
         config,
@@ -40,39 +39,39 @@ class PL_XoFTR(pl.LightningModule):
         teacher_ckpt: str | None = None,
         distill_alpha: float = 0.5,
         distill_temp: float = 1.0,
-        student_dim: int = 128,
-        teacher_dim: int = 256,
     ):
         super().__init__()
         self.config = config
-        _config = lower_config(config)
-        self.xoftr_cfg = lower_config(_config["xoftr"])
         self.profiler = profiler or PassThroughProfiler()
         self.dump_dir = dump_dir
-        self.training_step_outputs = []
+        self.training_step_outputs: list[torch.Tensor] = []
         self.validation_step_outputs = []
         self.test_step_outputs = []
-        self.n_vals_plot = max(config.TRAINER.N_VAL_PAIRS_TO_PLOT // config.TRAINER.WORLD_SIZE, 1)
+        self.n_vals_plot = max(
+            config.TRAINER.N_VAL_PAIRS_TO_PLOT // config.TRAINER.WORLD_SIZE, 1
+        )
 
-        self.matcher = XoFTR(config=_config["xoftr"])
-        self.criterion = XoFTRLoss(_config)
-
+        # ---------------- Student ----------------
+        self.matcher = XoFTR(config=config["xoftr"])
+        self.criterion = XoFTRLoss(config)
         if pretrained_ckpt:
             state = torch.load(pretrained_ckpt, map_location="cpu")["state_dict"]
             self.matcher.load_state_dict(state, strict=False)
             logger.info(f"Loaded pretrained weights from {pretrained_ckpt}")
 
+        # ---------------- Teacher (optional) -----
         self.distillation = teacher_cfg is not None and teacher_ckpt is not None
         self.distill_alpha = float(distill_alpha)
         self.distill_temp = float(distill_temp)
-
         if self.distillation:
             from src_teacher.xoftr import XoFTR as TeacherXoFTR
-            from src_teacher.config.default import get_cfg_defaults as get_teacher_cfg_defaults
+            from src_teacher.config.default import (
+                get_cfg_defaults as get_teacher_cfg_defaults,
+            )
             from src_teacher.utils.misc import lower_config as lower_teacher_config
 
-            _teacher_cfg = lower_teacher_config(get_teacher_cfg_defaults(inference=True))
-            self.teacher = TeacherXoFTR(config=_teacher_cfg["xoftr"])
+            _t_cfg = lower_teacher_config(get_teacher_cfg_defaults(inference=True))
+            self.teacher = TeacherXoFTR(config=_t_cfg["xoftr"])
             state = torch.load(teacher_ckpt, map_location="cpu")["state_dict"]
             self.teacher.load_state_dict(state, strict=False)
             self.teacher.eval()
@@ -80,13 +79,6 @@ class PL_XoFTR(pl.LightningModule):
                 p.requires_grad_(False)
         else:
             self.teacher = None
-
-        if self.distillation and student_dim != teacher_dim:
-            self.logit_proj0 = torch.nn.Linear(student_dim, teacher_dim, bias=False)
-            self.logit_proj1 = torch.nn.Linear(student_dim, teacher_dim, bias=False)
-        else:
-            self.logit_proj0 = torch.nn.Identity()
-            self.logit_proj1 = torch.nn.Identity()
 
     def setup(self, stage: str):
         if isinstance(self.logger, list):
@@ -142,21 +134,31 @@ class PL_XoFTR(pl.LightningModule):
         return ret_dict, rel_pair_names
     
     def training_step(self, batch: dict, batch_idx: int):
-        self._trainval_inference(batch)
-        loss = batch["loss"]
+        """Run student, compute supervised loss, optionally add KD loss."""
+        self._trainval_inference(batch)            # student forward pass
+        loss = batch["loss"]                       # supervised
 
         if self.distillation:
+            # ---- teacher logits (no grad) ----
             with torch.no_grad():
                 t_out0, t_out1 = self.teacher(batch, return_logits=True)
-            s_out0, s_out1 = self.matcher(batch, return_logits=True)
-            s_out0 = self.logit_proj0(s_out0)
-            s_out1 = self.logit_proj1(s_out1)
-            kl_0 = F.kl_div(F.log_softmax(s_out0 / self.distill_temp, dim=-1), F.softmax(t_out0 / self.distill_temp, dim=-1), reduction="batchmean")
-            kl_1 = F.kl_div(F.log_softmax(s_out1 / self.distill_temp, dim=-1), F.softmax(t_out1 / self.distill_temp, dim=-1), reduction="batchmean")
-            distill_loss = (kl_0 + kl_1) / 2.0 * (self.distill_temp ** 2)
-            loss = (1.0 - self.distill_alpha) * loss + self.distill_alpha * distill_loss
+
+            # ---- student logits (cached) -----
+            s_out0: torch.Tensor = batch["sim_matrix_fine"]
+            s_out1 = s_out0.transpose(1, 2)
+
+            T = self.distill_temp
+            def _kd(s, t):
+                return F.kl_div(
+                    F.log_softmax(s / T, dim=-1),
+                    F.softmax(t / T, dim=-1),
+                    reduction="batchmean",
+                )
+
+            kd_loss = 0.5 * (_kd(s_out0, t_out0) + _kd(s_out1, t_out1)) * (T ** 2)
+            loss = (1.0 - self.distill_alpha) * loss + self.distill_alpha * kd_loss
             batch["loss"] = loss
-            batch["loss_scalars"].update({"distill_loss": distill_loss.detach()})
+            batch["loss_scalars"].update({"distill_loss": kd_loss.detach()})
 
         if self.global_rank == 0 and self.global_step % self.trainer.log_every_n_steps == 0:
             for k, v in batch["loss_scalars"].items():

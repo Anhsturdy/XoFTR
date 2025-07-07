@@ -56,7 +56,7 @@ class FineSubMatching(nn.Module):
                                [feat_f0, feat_f1])
         sim_matrix = torch.einsum("nlc,nsc->nls", feat_f0,
                                       feat_f1) / self.temperature
-        
+        data['sim_matrix_fine'] = sim_matrix  
         conf_matrix_fine = F.softmax(sim_matrix, 1) * F.softmax(sim_matrix, 2)
         data.update({'conf_matrix_fine': conf_matrix_fine})
 
