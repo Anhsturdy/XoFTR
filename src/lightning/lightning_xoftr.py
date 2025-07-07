@@ -227,9 +227,6 @@ class PL_XoFTR(pl.LightningModule):
             batch["loss"] = loss
             batch["loss_scalars"].update({"distill_loss": distill_loss.detach()})
 
-        # keep for epoch‑average
-        self.training_step_outputs.append(loss)
-
         # lightweight logging (rank‑0 only)
         if (
             self.global_rank == 0
@@ -245,15 +242,15 @@ class PL_XoFTR(pl.LightningModule):
     # ------------------------------------------------------------------
     # Epoch‑end helpers (unchanged except cosmetic edits)...
     # ------------------------------------------------------------------
-    def on_training_epoch_end(self):
-        if self.global_rank == 0:
-            avg = torch.stack(self.training_step_outputs).mean()
-            self.tb_logger.experiment.add_scalar(
-                "train/avg_loss_on_epoch", avg, global_step=self.current_epoch
-            )
-            if self.config.TRAINER.USE_WANDB and self.wandb_logger:
-                self.wandb_logger.log_metrics({"train/avg_loss_on_epoch": avg}, self.current_epoch)
-        self.training_step_outputs.clear()
+    # def on_training_epoch_end(self):
+    #     if self.global_rank == 0:
+    #         avg = torch.stack(self.training_step_outputs).mean()
+    #         self.tb_logger.experiment.add_scalar(
+    #             "train/avg_loss_on_epoch", avg, global_step=self.current_epoch
+    #         )
+    #         if self.config.TRAINER.USE_WANDB and self.wandb_logger:
+    #             self.wandb_logger.log_metrics({"train/avg_loss_on_epoch": avg}, self.current_epoch)
+    #     self.training_step_outputs.clear()
     
     def validation_step(self, batch, batch_idx):
         if self.config.DATASET.VAL_DATA_SOURCE == "VisTir":
