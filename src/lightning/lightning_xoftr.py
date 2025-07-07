@@ -28,19 +28,7 @@ import torch.nn.functional as F
 class PL_XoFTR(pl.LightningModule):
     """Lightning wrapper that supports knowledge‑distillation between a
     *teacher* XoFTR and a lighter *student* model with smaller hidden size.
-
-    Key fixes compared with the user‑supplied version
-    -----------------------------------------------
-    1.  Projection layers live in ``__init__`` so they are registered, moved to
-        the right device automatically, and optimised.
-    2.  Teacher / student are always on the same device (handled by PL).
-    3.  No recreation of layers every mini‑batch ➔ consistent weights & no
-        "cuda vs cpu" error.
     """
-
-    # ---------------------------------------------------------------------
-    # Initialiser
-    # ---------------------------------------------------------------------
     def __init__(
         self,
         config,
@@ -52,49 +40,38 @@ class PL_XoFTR(pl.LightningModule):
         teacher_ckpt: str | None = None,
         distill_alpha: float = 0.5,
         distill_temp: float = 1.0,
-        student_dim: int = 128,  # final logit dim of *student*
-        teacher_dim: int = 256,  # final logit dim of *teacher*
+        student_dim: int = 128,
+        teacher_dim: int = 256,
     ):
         super().__init__()
-
-        # ---------- basic bookkeeping ----------
         self.config = config
-        _config = lower_config(config)  # flattened dict‑like access
+        _config = lower_config(config)
         self.xoftr_cfg = lower_config(_config["xoftr"])
         self.profiler = profiler or PassThroughProfiler()
         self.dump_dir = dump_dir
-        self.training_step_outputs: list[torch.Tensor] = []
-        self.validation_step_outputs: list[dict] = []
-        self.test_step_outputs: list[dict] = []
-        self.n_vals_plot = max(
-            config.TRAINER.N_VAL_PAIRS_TO_PLOT // config.TRAINER.WORLD_SIZE, 1
-        )
+        self.training_step_outputs = []
+        self.validation_step_outputs = []
+        self.test_step_outputs = []
+        self.n_vals_plot = max(config.TRAINER.N_VAL_PAIRS_TO_PLOT // config.TRAINER.WORLD_SIZE, 1)
 
-        # ---------- student  ----------
         self.matcher = XoFTR(config=_config["xoftr"])
-        self.loss = XoFTRLoss(_config)
+        self.criterion = XoFTRLoss(_config)
 
         if pretrained_ckpt:
             state = torch.load(pretrained_ckpt, map_location="cpu")["state_dict"]
             self.matcher.load_state_dict(state, strict=False)
             logger.info(f"Loaded pretrained weights from {pretrained_ckpt}")
 
-        # ---------- distillation setup ----------
-        self.distillation: bool = teacher_cfg is not None and teacher_ckpt is not None
+        self.distillation = teacher_cfg is not None and teacher_ckpt is not None
         self.distill_alpha = float(distill_alpha)
         self.distill_temp = float(distill_temp)
 
         if self.distillation:
-            # Teacher network (no grad)
             from src_teacher.xoftr import XoFTR as TeacherXoFTR
-            from src_teacher.config.default import (
-                get_cfg_defaults as get_teacher_cfg_defaults,
-            )
+            from src_teacher.config.default import get_cfg_defaults as get_teacher_cfg_defaults
             from src_teacher.utils.misc import lower_config as lower_teacher_config
 
-            _teacher_cfg = lower_teacher_config(
-                get_teacher_cfg_defaults(inference=True)
-            )
+            _teacher_cfg = lower_teacher_config(get_teacher_cfg_defaults(inference=True))
             self.teacher = TeacherXoFTR(config=_teacher_cfg["xoftr"])
             state = torch.load(teacher_ckpt, map_location="cpu")["state_dict"]
             self.teacher.load_state_dict(state, strict=False)
@@ -102,21 +79,16 @@ class PL_XoFTR(pl.LightningModule):
             for p in self.teacher.parameters():
                 p.requires_grad_(False)
         else:
-            self.teacher = None  # type: ignore
+            self.teacher = None
 
-        # ---------- projection layers (always created so they are registered) ----------
         if self.distillation and student_dim != teacher_dim:
             self.logit_proj0 = torch.nn.Linear(student_dim, teacher_dim, bias=False)
             self.logit_proj1 = torch.nn.Linear(student_dim, teacher_dim, bias=False)
-        else:  # same dim – identity projection
+        else:
             self.logit_proj0 = torch.nn.Identity()
             self.logit_proj1 = torch.nn.Identity()
 
-    # ------------------------------------------------------------------
-    # Lightning plumbing
-    # ------------------------------------------------------------------
     def setup(self, stage: str):
-        # split tb vs. wandb loggers if user supplied a list
         if isinstance(self.logger, list):
             self.tb_logger = self.logger[0]
             self.wandb_logger = self.logger[1] if len(self.logger) > 1 else None
@@ -124,54 +96,34 @@ class PL_XoFTR(pl.LightningModule):
             self.tb_logger = self.logger
             self.wandb_logger = None
 
-    # ------------------------------------------------------------------
-    # Optimiser / scheduler
-    # ------------------------------------------------------------------
     def configure_optimizers(self):
         optim = build_optimizer(self, self.config)
         sched = build_scheduler(self.config, optim)
         return [optim], [sched]
-    
-    def optimizer_step(
-            self, epoch, batch_idx, optimizer,
-            optimizer_closure, on_tpu=False, using_native_amp=False, using_lbfgs=False):
-        # learning rate warm up
+
+    def optimizer_step(self, epoch, batch_idx, optimizer, optimizer_closure, on_tpu=False, using_native_amp=False, using_lbfgs=False):
         warmup_step = self.config.TRAINER.WARMUP_STEP
         if self.trainer.global_step < warmup_step:
             if self.config.TRAINER.WARMUP_TYPE == 'linear':
                 base_lr = self.config.TRAINER.WARMUP_RATIO * self.config.TRAINER.TRUE_LR
-                lr = base_lr + \
-                    (self.trainer.global_step / self.config.TRAINER.WARMUP_STEP) * \
-                    abs(self.config.TRAINER.TRUE_LR - base_lr)
+                lr = base_lr + (self.trainer.global_step / self.config.TRAINER.WARMUP_STEP) * abs(self.config.TRAINER.TRUE_LR - base_lr)
                 for pg in optimizer.param_groups:
                     pg['lr'] = lr
-            elif self.config.TRAINER.WARMUP_TYPE == 'constant':
-                pass
-            else:
-                raise ValueError(f'Unknown lr warm-up strategy: {self.config.TRAINER.WARMUP_TYPE}')
-
-        # update params
         optimizer.step(closure=optimizer_closure)
         optimizer.zero_grad()
 
-    # ------------------------------------------------------------------
-    # Helper: forward through matcher, compute standard losses
-    # ------------------------------------------------------------------
     def _trainval_inference(self, batch):
         with self.profiler.profile("Compute coarse supervision"):
             compute_supervision_coarse(batch, self.config)
-        
         with self.profiler.profile("XoFTR"):
             self.matcher(batch)
-        
         with self.profiler.profile("Compute fine supervision"):
             compute_supervision_fine(batch, self.config)
-            
         with self.profiler.profile("Compute losses"):
-            self.loss(batch)
+            self.criterion(batch)
 
     def _compute_metrics(self, batch):
-        with self.profiler.profile("Copmute metrics"):
+        with self.profiler.profile("Compute metrics"):
             compute_symmetrical_epipolar_errors(batch)  # compute epi_errs for each match
             compute_pose_errors(batch, self.config)  # compute R_errs, t_errs, pose_errs for each pair
 
@@ -188,56 +140,35 @@ class PL_XoFTR(pl.LightningModule):
                 metrics.update({'scene_id': batch['scene_id']})
             ret_dict = {'metrics': metrics}
         return ret_dict, rel_pair_names
-
-    # ------------------------------------------------------------------
-    # Main training step
-    # ------------------------------------------------------------------
+    
     def training_step(self, batch: dict, batch_idx: int):
-        # Step 1: supervised loss from student
         self._trainval_inference(batch)
         loss = batch["loss"]
 
-        # Step 2: distillation (if teacher provided)
         if self.distillation:
             with torch.no_grad():
                 t_out0, t_out1 = self.teacher(batch, return_logits=True)
             s_out0, s_out1 = self.matcher(batch, return_logits=True)
-
-            # project student logits if needed (Identity() when dims match)
             s_out0 = self.logit_proj0(s_out0)
             s_out1 = self.logit_proj1(s_out1)
-
-            # KL divergence with temperature scaling
-            kl_0 = F.kl_div(
-                F.log_softmax(s_out0 / self.distill_temp, dim=-1),
-                F.softmax(t_out0 / self.distill_temp, dim=-1),
-                reduction="batchmean",
-            )
-            kl_1 = F.kl_div(
-                F.log_softmax(s_out1 / self.distill_temp, dim=-1),
-                F.softmax(t_out1 / self.distill_temp, dim=-1),
-                reduction="batchmean",
-            )
-            distill_loss = (kl_0 + kl_1) / 2.0 * (self.distill_temp**2)
-
-            # blend with supervised loss
+            kl_0 = F.kl_div(F.log_softmax(s_out0 / self.distill_temp, dim=-1), F.softmax(t_out0 / self.distill_temp, dim=-1), reduction="batchmean")
+            kl_1 = F.kl_div(F.log_softmax(s_out1 / self.distill_temp, dim=-1), F.softmax(t_out1 / self.distill_temp, dim=-1), reduction="batchmean")
+            distill_loss = (kl_0 + kl_1) / 2.0 * (self.distill_temp ** 2)
             loss = (1.0 - self.distill_alpha) * loss + self.distill_alpha * distill_loss
-
-            # for logging
             batch["loss"] = loss
             batch["loss_scalars"].update({"distill_loss": distill_loss.detach()})
 
-        # lightweight logging (rank‑0 only)
-        if (
-            self.global_rank == 0
-            and self.global_step % self.trainer.log_every_n_steps == 0
-        ):
+        if self.global_rank == 0 and self.global_step % self.trainer.log_every_n_steps == 0:
             for k, v in batch["loss_scalars"].items():
                 self.tb_logger.experiment.add_scalar(f"train/{k}", v, self.global_step)
                 if self.config.TRAINER.USE_WANDB and self.wandb_logger:
                     self.wandb_logger.log_metrics({f"train/{k}": v}, self.global_step)
 
         return {"loss": loss}
+
+    def on_save_checkpoint(self, checkpoint: dict) -> None:
+        state = checkpoint.get("state_dict", {})
+        checkpoint["state_dict"] = {k: v for k, v in state.items() if not k.startswith("teacher.")}
 
     # ------------------------------------------------------------------
     # Epoch‑end helpers (unchanged except cosmetic edits)...
@@ -353,6 +284,7 @@ class PL_XoFTR(pl.LightningModule):
             self.log(f'auc@{thr}', torch.tensor(np.mean(multi_val_metrics[f'auc@{thr}'])))  # ckpt monitors on this
         self.validation_step_outputs.clear()
 
+
     def test_step(self, batch, batch_idx):
         with self.profiler.profile("XoFTR"):
             self.matcher(batch)
@@ -433,3 +365,4 @@ class PL_XoFTR(pl.LightningModule):
             if self.dump_dir is not None:
                 np.save(Path(self.dump_dir) / 'XoFTR_pred_eval', dumps)
         self.test_step_outputs.clear()
+
