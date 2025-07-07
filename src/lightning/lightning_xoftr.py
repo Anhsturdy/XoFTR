@@ -147,17 +147,21 @@ class PL_XoFTR(pl.LightningModule):
         self._trainval_inference(batch)
         loss = batch['loss']
         if self.distillation:
+            self.logit_proj0 = torch.nn.Linear(128,256)  # example: 128 → 256
+            self.logit_proj1 = torch.nn.Linear(128,256)  # example: 128 → 256
             with torch.no_grad():
                 teacher_out0, teacher_out1 = self.teacher(batch, return_logits=True)  # adapt as needed
             student_out0, student_out1 = self.matcher(batch, return_logits=True)     # adapt as needed
-
+            
+            student_out0_proj = self.logit_proj0(student_out0)
+            student_out1_proj = self.logit_proj1(student_out1)
             distill_loss0 = F.kl_div(
-                F.log_softmax(student_out0 / self.distill_temp, dim=-1),
+                F.log_softmax(student_out0_proj / self.distill_temp, dim=-1),
                 F.softmax(teacher_out0 / self.distill_temp, dim=-1),
                 reduction='batchmean'
             )
             distill_loss1 = F.kl_div(
-                F.log_softmax(student_out1 / self.distill_temp, dim=-1),
+                F.log_softmax(student_out1_proj / self.distill_temp, dim=-1),
                 F.softmax(teacher_out1 / self.distill_temp, dim=-1),
                 reduction='batchmean'
             )

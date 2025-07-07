@@ -156,12 +156,10 @@ class PL_XoFTR_Pretrain(pl.LightningModule):
         return output
         
     def on_validation_epoch_end(self):
-        if not hasattr(self, "val_outputs") or not self.val_outputs:
-            return
+
 
         self.val_generator.manual_seed(self.val_seed)
-        outputs = self.val_outputs
-        self.val_outputs = []  # Clear for next epoch
+        outputs = self.validation_step_outputs
 
         multi_outputs = [outputs] if not isinstance(outputs[0], (list, tuple)) else outputs
 
@@ -187,4 +185,6 @@ class PL_XoFTR_Pretrain(pl.LightningModule):
                         pass
 
         plt.close('all')
+        self.validation_step_outputs.clear()
+
 
