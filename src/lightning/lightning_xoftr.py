@@ -42,6 +42,7 @@ class PL_XoFTR(pl.LightningModule):
     ):
         super().__init__()
         self.config = config
+        _config = lower_config(config)
         self.profiler = profiler or PassThroughProfiler()
         self.dump_dir = dump_dir
         self.training_step_outputs: list[torch.Tensor] = []
@@ -52,8 +53,8 @@ class PL_XoFTR(pl.LightningModule):
         )
 
         # ---------------- Student ----------------
-        self.matcher = XoFTR(config=config["xoftr"])
-        self.criterion = XoFTRLoss(config)
+        self.matcher = XoFTR(config=_config["xoftr"])
+        self.criterion = XoFTRLoss(_config)
         if pretrained_ckpt:
             state = torch.load(pretrained_ckpt, map_location="cpu")["state_dict"]
             self.matcher.load_state_dict(state, strict=False)
